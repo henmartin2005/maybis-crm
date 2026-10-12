@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Firma y Logo — Emails{% endblock %}
+
+{% block content %}
+<div class="pg-header">
+  <div>
+    <ul class="breadcrumb">
+      <li class="breadcrumb-item"><a href="{{ url_for('emails.index') }}">Emails</a></li>
+      <li class="breadcrumb-item active">Firma y Logo</li>
+    </ul>
+    <h1 class="pg-title">Firma y Logo de empresa</h1>
+  </div>
+  <div class="pg-actions">
+    <a href="{{ url_for('emails.signature_preview') }}" target="_blank" class="btn-md"
+       style="border:1px solid var(--c-border);background:var(--c-surface);color:var(--c-text-2);text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:32px;border-radius:var(--radius-sm);font-size:13px;">
+      <i class="bi bi-eye"></i> Vista previa
+    </a>
+  </div>
+</div>
+
+<div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;">
+
+  <!-- Form -->
+  <div class="section-card" style="flex:1;min-width:320px;margin-top:0;">
+    <form id="sigForm" enctype="multipart/form-data" method="POST" action="{{ url_for('emails.save_email_settings') }}"
+          style="display:flex;flex-direction:column;gap:18px;">
+
+      <div>
+        <label class="form-label">Logo de la empresa</label>
+        <input type="text" name="company_logo_url" id="logoUrl" class="form-control"
+               value="{{ settings.get('company_logo_url', '') }}"
+               placeholder="{{ brand.website or 'https://tuempresa.com' }}/logo.png" />
+        <div class="form-text">Pega la URL directa de la imagen (PNG, JPG o WEBP — Gmail no muestra SVG) o súbela aquí:</div>
+        <input type="file" name="logo_file" id="logoFile" accept=".png,.jpg,.jpeg,.gif,.webp" class="form-control" style="margin-top:8px;" />
+        <div id="logoCheck" class="form-text" style="margin-top:6px;"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+        <div>
+          <label class="form-label">Ubicación del logo</label>
+          {% set lp = settings.get('logo_position') or 'header' %}
+          <select name="logo_position" class="form-control">
+            <option value="header" {% if lp == 'header' %}selected{% endif %}>Encabezado (arriba)</option>
+            <option value="signature" {% if lp == 'signature' %}selected{% endif %}>En la firma (abajo)</option>
+            <option value="both" {% if lp == 'both' %}selected{% endif %}>Encabezado y firma</option>
+            <option value="none" {% if lp == 'none' %}selected{% endif %}>Sin logo</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Alineación</label>
+          {% set la = settings.get('logo_align') or 'center' %}
+          <select name="logo_align" class="form-control">
+            <option value="left" {% if la == 'left' %}selected{% endif %}>Izquierda</option>
+            <option value="center" {% if la == 'center' %}selected{% endif %}>Centro</option>
+            <option value="right" {% if la == 'right' %}selected{% endif %}>Derecha</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Altura: <span id="logoHVal">{{ settings.get('logo_height') or 80 }}</span> px</label>
+          <input type="range" name="logo_height" id="logoH" min="24" max="200" step="4"
+                 value="{{ settings.get('logo_height') or 80 }}" style="width:100%;" />
+        </div>
+      </div>
+
+      <hr style="border-color:var(--c-border);margin:0;">
+
+      <div style="font-size:12px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:.05em;">
+        Información de firma
+      </div>
+
+      <div>
+        <label class="form-label">Nombre</label>
+        <input type="text" name="signature_name" class="form-control"
+               value="{{ settings.get('signature_name', '') }}"
+               placeholder="{{ brand.owner_name }}" />
+      </div>
+
+      <div>
+        <label class="form-label">Cargo / Título</label>
+        <input type="text" name="signature_title" class="form-control"
+               value="{{ settings.get('signature_title', '') }}"
+               placeholder="CEO & Founder" />
+      </div>
+
+      <div>
+        <label class="form-label">Teléfono</label>
+        <input type="text" name="signature_phone" class="form-control"
+               value="{{ settings.get('signature_phone', '') }}"
+               placeholder="+1 (555) 000-0000" />
+      </div>
+
+      <div>
+        <label class="form-label">Email de contacto</label>
+        <input type="email" name="signature_email" class="form-control"
+               value="{{ settings.get('signature_email', '') }}"
+               placeholder="{{ brand.contact_email }}" />
+      </div>
+
+      <div>
+        <label class="form-label">Sitio web</label>
+        <input type="url" name="signature_website" class="form-control"
+               value="{{ settings.get('signature_website', '') }}"
+               placeholder="{{ brand.website }}" />
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:4px;">
+        <a href="{{ url_for('emails.index') }}"
+           style="display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 12px;border-radius:var(--radius-sm);border:1px solid var(--c-border);background:var(--c-surface);color:var(--c-text-2);font-size:12px;text-decoration:none;">
+          Cancelar
+        </a>
+        <button type="submit" class="btn-wa-send" style="height:32px;font-size:13px;padding:0 18px;">
+          <i class="bi bi-check-lg"></i> Guardar
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Live preview -->
+  <div style="flex:1;min-width:300px;">
+    <div style="font-size:12px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">
+      Vista previa de firma
+    </div>
+    <div style="border:1px solid var(--c-border);border-radius:8px;overflow:hidden;background:#f9fafb;">
+      <iframe src="{{ url_for('emails.signature_preview') }}"
+              style="width:100%;height:420px;border:none;display:block;"
+              id="previewFrame"></iframe>
+    </div>
+    <div style="font-size:11.5px;color:var(--c-text-3);margin-top:8px;">
+      <a href="{{ url_for('emails.signature_preview') }}" target="_blank"
+         style="color:var(--c-accent);text-decoration:none;">
+        <i class="bi bi-box-arrow-up-right"></i> Abrir en nueva pestaña
+      </a>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form  = document.getElementById('sigForm');
+  const frame = document.getElementById('previewFrame');
+  const base  = {{ url_for('emails.signature_preview') | tojson }};
+  const urlIn = document.getElementById('logoUrl');
+  const fileIn = document.getElementById('logoFile');
+  const check = document.getElementById('logoCheck');
+  const hIn = document.getElementById('logoH');
+  const hVal = document.getElementById('logoHVal');
+  const orgLogo = {{ (settings.get('_org_logo') or '') | tojson }};
+  let timer = null;
+
+  function refreshPreview() {
+    const p = new URLSearchParams();
+    new FormData(form).forEach((v, k) => { if (typeof v === 'string') p.append(k, v); });
+    p.append('_t', Date.now());
+    if (frame) frame.src = base + '?' + p.toString();
+  }
+  function schedule() { clearTimeout(timer); timer = setTimeout(refreshPreview, 400); }
+
+  function checkLogo() {
+    if (fileIn.files && fileIn.files[0]) {
+      check.style.color = 'var(--c-accent)';
+      check.textContent = 'Archivo listo: ' + fileIn.files[0].name + ' — se subirá al pulsar Guardar.';
+      return;
+    }
+    const url = urlIn.value.trim();
+    if (!url) {
+      check.style.color = 'var(--c-text-3)';
+      check.textContent = orgLogo ? 'Sin URL: se usará el logo de la organización.' : 'Sin logo configurado.';
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      const ok = /\.(png|jpe?g|gif|webp)(\?|#|$)/i.test(url) || url.includes('/static/logos/');
+      check.style.color = ok ? '#16a34a' : '#d97706';
+      check.textContent = ok ? '✓ Logo válido (' + img.naturalWidth + '×' + img.naturalHeight + ' px).'
+        : '⚠ La imagen carga, pero la URL no termina en .png/.jpg/.webp; puede fallar en algunos correos.';
+    };
+    img.onerror = () => {
+      check.style.color = '#dc2626';
+      check.textContent = '✕ Esta URL no es una imagen (parece una página web). ' +
+        (orgLogo ? 'Mientras tanto se usa el logo de la organización.' : 'Pega la URL directa del archivo o súbelo.');
+    };
+    img.src = url;
+  }
+
+  form.addEventListener('input', e => {
+    if (e.target === hIn) hVal.textContent = hIn.value;
+    if (e.target === urlIn) checkLogo();
+    schedule();
+  });
+  form.addEventListener('change', e => { if (e.target === fileIn) checkLogo(); schedule(); });
+  checkLogo();
+})();
+</script>
+{% endblock %}

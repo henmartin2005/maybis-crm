@@ -1,0 +1,412 @@
+from datetime import datetime
+
+from database import get_db
+import instance_config as _cfg
+
+# Etapas del pipeline y tipos de servicio: vienen de instance/business.json
+# (o config_defaults/business.json). Cambiarlos requiere Reload de la web app.
+PIPELINE_STAGES = _cfg.pipeline_stages()
+
+PROJECT_TYPES = _cfg.project_types()
+
+NOTE_TYPES = [
+    ('note', 'Nota'),
+    ('call', 'Llamada'),
+    ('meeting', 'Reunión'),
+    ('email', 'Email'),
+    ('whatsapp', 'WhatsApp'),
+    ('website_lead', 'Lead Web'),
+]
+
+FOLLOW_UP_METHODS = [
+    ('phone', 'Teléfono'),
+    ('email', 'Email'),
+    ('whatsapp', 'WhatsApp'),
+    ('meeting', 'Reunión'),
+    ('other', 'Otro'),
+]
+
+STAGE_COLORS = _cfg.stage_colors()
+
+
+def get_all_clients(org_id, search=None):
+    db = get_db()
+    if search:
+        q = f"%{search}%"
+        rows = db.execute("""
+            SELECT *, (total_cost - amount_paid) AS pending
+            FROM clients
+            WHERE org_id = ?
+              AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?
+               OR company LIKE ? OR project_type LIKE ?)
+            ORDER BY created_at DESC
+        """, (org_id, q, q, q, q, q)).fetchall()
+    else:
+        rows = db.execute("""
+            SELECT *, (total_cost - amount_paid) AS pending
+            FROM clients
+            WHERE org_id = ?
+            ORDER BY created_at DESC
+        """, (org_id,)).fetchall()
+    db.close()
+    return rows
+
+
+def get_client(client_id, org_id):
+    db = get_db()
+    row = db.execute("""
+        SELECT *, (total_cost - amount_paid) AS pending
+        FROM clients WHERE id = ? AND org_id = ?
+    """, (client_id, org_id)).fetchone()
+    db.close()
+    return row
+
+
+def create_client(data, org_id=1):
+    db = get_db()
+    cursor = db.execute("""
+        INSERT INTO clients
+            (first_name, last_name, email, phone, company, project_type,
+             project_details, pipeline_stage, total_cost, amount_paid, org_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data['first_name'], data['last_name'], data['email'],
+        data.get('phone', ''), data.get('company', ''),
+        data['project_type'], data.get('project_details', ''),
+        data.get('pipeline_stage', 'new_lead'),
+        float(data.get('total_cost', 0)),
+        float(data.get('amount_paid', 0)),
+        org_id,
+    ))
+    db.commit()
+    new_id = cursor.lastrowid
+    db.close()
+    return new_id
+
+
+def update_client(client_id, data, org_id):
+    db = get_db()
+    db.execute("""
+        UPDATE clients SET
+            first_name=?, last_name=?, email=?, phone=?, company=?,
+            project_type=?, project_details=?, pipeline_stage=?,
+            total_cost=?, amount_paid=?, brochure_sent=?,
+            updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND org_id=?
+    """, (
+        data['first_name'], data['last_name'], data['email'],
+        data.get('phone', ''), data.get('company', ''),
+        data['project_type'], data.get('project_details', ''),
+        data.get('pipeline_stage', 'new_lead'),
+        float(data.get('total_cost', 0)),
+        float(data.get('amount_paid', 0)),
+        1 if data.get('brochure_sent') else 0,
+        client_id, org_id,
+    ))
+    db.commit()
+    db.close()
+
+
+def update_pipeline_stage(client_id, stage, org_id):
+    db = get_db()
+    db.execute("""
+        UPDATE clients SET pipeline_stage=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND org_id=?
+    """, (stage, client_id, org_id))
+    db.commit()
+    db.close()
+
+
+def delete_client(client_id, org_id):
+    """Borra un cliente resolviendo antes las referencias que no tienen
+    ON DELETE CASCADE / SET NULL (whatsapp_messages, emails, meta_messages...).
+    El historial se conserva desvinculado (client_id = NULL); si la columna
+    es NOT NULL, esas filas se eliminan."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT id FROM clients WHERE id=? AND org_id=?", (client_id, org_id)
+        ).fetchone()
+        if not row:
+            return False
+        tables = [r[0] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()]
+        for table in tables:
+            for fk in db.execute(f'PRAGMA foreign_key_list("{table}")').fetchall():
+                if fk[2] != 'clients':
+                    continue
+                col, on_delete = fk[3], (fk[6] or '').upper()
+                if on_delete in ('CASCADE', 'SET NULL'):
+                    continue
+                notnull = any(
+                    c[1] == col and c[3]
+                    for c in db.execute(f'PRAGMA table_info("{table}")').fetchall()
+                )
+                if notnull:
+                    db.execute(f'DELETE FROM "{table}" WHERE "{col}"=?', (client_id,))
+                else:
+                    db.execute(f'UPDATE "{table}" SET "{col}"=NULL WHERE "{col}"=?', (client_id,))
+        db.execute("DELETE FROM clients WHERE id=? AND org_id=?", (client_id, org_id))
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def get_client_notes(client_id):
+    db = get_db()
+    rows = db.execute("""
+        SELECT * FROM notes WHERE client_id=? ORDER BY created_at DESC
+    """, (client_id,)).fetchall()
+    db.close()
+    return rows
+
+
+def add_note(client_id, note_type, content):
+    db = get_db()
+    db.execute("""
+        INSERT INTO notes (client_id, note_type, content) VALUES (?, ?, ?)
+    """, (client_id, note_type, content))
+    db.commit()
+    db.close()
+
+
+def _now_str():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _normalize_reminder_at(value):
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%dT%H:%M').strftime('%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(value, '%Y-%m-%d %H:%M').strftime('%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return value
+
+
+def get_client_followups(client_id):
+    db = get_db()
+    rows = db.execute("""
+        SELECT * FROM follow_ups
+        WHERE client_id=?
+        ORDER BY COALESCE(next_at, next_date, created_at) DESC
+    """, (client_id,)).fetchall()
+    db.close()
+    return rows
+
+
+def add_followup(client_id, method, summary, result, next_date=None, next_at=None, reminder_comment=''):
+    normalized_next_at = _normalize_reminder_at(next_at)
+    reminder_date = next_date
+    if normalized_next_at:
+        reminder_date = normalized_next_at[:10]
+
+    db = get_db()
+    db.execute("""
+        INSERT INTO follow_ups
+            (client_id, method, summary, result, next_date, next_at, reminder_comment)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        client_id,
+        method,
+        summary,
+        result,
+        reminder_date or None,
+        normalized_next_at,
+        reminder_comment or '',
+    ))
+    db.commit()
+    db.close()
+
+
+def get_todays_followups(org_id):
+    db   = get_db()
+    rows = db.execute("""
+        SELECT f.*, c.first_name, c.last_name, c.email, c.phone
+        FROM follow_ups f
+        JOIN clients c ON c.id = f.client_id
+        WHERE COALESCE(date(f.next_at), f.next_date) = date('now', 'localtime')
+          AND f.completed = 0
+          AND c.org_id = ?
+        ORDER BY COALESCE(f.next_at, f.next_date, f.created_at)
+    """, (org_id,)).fetchall()
+    db.close()
+    return rows
+
+
+def get_due_tasks(org_id):
+    db   = get_db()
+    rows = db.execute("""
+        SELECT f.*, c.first_name, c.last_name, c.email, c.phone
+        FROM follow_ups f
+        JOIN clients c ON c.id = f.client_id
+        WHERE f.completed = 0
+          AND c.org_id = ?
+          AND (
+            (f.next_at IS NOT NULL AND f.next_at <= ?)
+            OR (f.next_at IS NULL AND f.next_date IS NOT NULL AND f.next_date <= date('now', 'localtime'))
+          )
+        ORDER BY COALESCE(f.next_at, f.next_date, f.created_at)
+    """, (org_id, _now_str())).fetchall()
+    db.close()
+    return rows
+
+
+def get_due_task_count(org_id):
+    db  = get_db()
+    row = db.execute("""
+        SELECT COUNT(*)
+        FROM follow_ups f
+        JOIN clients c ON c.id = f.client_id
+        WHERE f.completed = 0
+          AND c.org_id = ?
+          AND (
+            (f.next_at IS NOT NULL AND f.next_at <= ?)
+            OR (f.next_at IS NULL AND f.next_date IS NOT NULL AND f.next_date <= date('now', 'localtime'))
+          )
+    """, (org_id, _now_str())).fetchone()
+    db.close()
+    return row[0]
+
+
+def get_all_tasks(org_id):
+    db   = get_db()
+    rows = db.execute("""
+        SELECT f.*, c.first_name, c.last_name, c.email, c.phone
+        FROM follow_ups f
+        JOIN clients c ON c.id = f.client_id
+        WHERE (f.next_at IS NOT NULL OR f.next_date IS NOT NULL)
+          AND c.org_id = ?
+        ORDER BY f.completed ASC, COALESCE(f.next_at, f.next_date, f.created_at) ASC
+    """, (org_id,)).fetchall()
+    db.close()
+    return rows
+
+
+def complete_followup(followup_id):
+    db = get_db()
+    db.execute("UPDATE follow_ups SET completed=1 WHERE id=?", (followup_id,))
+    db.commit()
+    db.close()
+
+
+def get_dashboard_stats(org_id):
+    db = get_db()
+
+    total_leads = db.execute(
+        "SELECT COUNT(*) FROM clients WHERE org_id=?", (org_id,)
+    ).fetchone()[0]
+
+    active_clients = db.execute(
+        "SELECT COUNT(*) FROM clients WHERE pipeline_stage IN ('active_client','recurring') AND org_id=?",
+        (org_id,)
+    ).fetchone()[0]
+
+    pending_proposals = db.execute(
+        "SELECT COUNT(*) FROM clients WHERE pipeline_stage = 'proposal_sent' AND org_id=?",
+        (org_id,)
+    ).fetchone()[0]
+
+    financials = db.execute("""
+        SELECT
+            COALESCE(SUM(total_cost), 0)              AS total_billed,
+            COALESCE(SUM(amount_paid), 0)             AS total_collected,
+            COALESCE(SUM(total_cost - amount_paid), 0) AS total_pending
+        FROM clients
+        WHERE org_id=?
+    """, (org_id,)).fetchone()
+
+    db.close()
+    return {
+        'total_leads': total_leads,
+        'active_clients': active_clients,
+        'pending_proposals': pending_proposals,
+        'total_billed': financials['total_billed'],
+        'total_collected': financials['total_collected'],
+        'total_pending': financials['total_pending'],
+    }
+
+
+def get_clients_by_stage(org_id):
+    db   = get_db()
+    rows = db.execute("""
+        SELECT *, (total_cost - amount_paid) AS pending
+        FROM clients WHERE org_id=? ORDER BY created_at DESC
+    """, (org_id,)).fetchall()
+    db.close()
+
+    stages = {stage: [] for stage, _ in PIPELINE_STAGES}
+    for row in rows:
+        stage = row['pipeline_stage']
+        if stage in stages:
+            stages[stage].append(row)
+    return stages
+
+
+# ── Columnas del pipeline personalizables por organización ──────────────
+def _ensure_stage_settings(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS pipeline_stage_settings (
+        org_id INTEGER NOT NULL,
+        stage_key TEXT NOT NULL,
+        label TEXT,
+        position INTEGER,
+        PRIMARY KEY (org_id, stage_key))""")
+
+
+def get_org_pipeline_stages(org_id):
+    """PIPELINE_STAGES con el nombre y el orden que eligió la organización."""
+    db = get_db()
+    try:
+        _ensure_stage_settings(db)
+        rows = db.execute(
+            "SELECT stage_key, label, position FROM pipeline_stage_settings WHERE org_id = ?",
+            (org_id,)).fetchall()
+    finally:
+        db.close()
+    custom = {r[0]: (r[1], r[2]) for r in rows}
+    default_pos = {k: i for i, (k, _) in enumerate(PIPELINE_STAGES)}
+    stages = []
+    for key, name in PIPELINE_STAGES:
+        label, pos = custom.get(key, (None, None))
+        label = (label or '').strip() or name
+        stages.append((key, label, pos if pos is not None else default_pos[key]))
+    stages.sort(key=lambda s: (s[2], default_pos[s[0]]))
+    return [(k, n) for k, n, _ in stages]
+
+
+def set_stage_label(org_id, stage_key, label):
+    db = get_db()
+    try:
+        _ensure_stage_settings(db)
+        db.execute("INSERT OR IGNORE INTO pipeline_stage_settings (org_id, stage_key) VALUES (?, ?)",
+                   (org_id, stage_key))
+        db.execute("UPDATE pipeline_stage_settings SET label = ? WHERE org_id = ? AND stage_key = ?",
+                   (label, org_id, stage_key))
+        db.commit()
+    finally:
+        db.close()
+
+
+def set_stage_order(org_id, order):
+    db = get_db()
+    try:
+        _ensure_stage_settings(db)
+        for i, key in enumerate(order):
+            db.execute("INSERT OR IGNORE INTO pipeline_stage_settings (org_id, stage_key) VALUES (?, ?)",
+                       (org_id, key))
+            db.execute("UPDATE pipeline_stage_settings SET position = ? WHERE org_id = ? AND stage_key = ?",
+                       (i, org_id, key))
+        db.commit()
+    finally:
+        db.close()

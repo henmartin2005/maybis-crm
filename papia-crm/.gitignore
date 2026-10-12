@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.env
+papia_crm.db
+chat_uploads/
+client_docs/
+
+# Respaldos y medios locales
+*.bak
+*.bak-*
+*.db.bak*
+wa_media/
+
+# Configuración y datos de cada instancia (cliente) — nunca al repo
+instance/
+*.db
+
+# Logos e imágenes propias de cada instancia
+static/brand/
+contract_files/

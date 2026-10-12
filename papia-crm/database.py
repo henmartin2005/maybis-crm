@@ -1,0 +1,560 @@
+import logging
+import os
+import re
+import sqlite3
+from werkzeug.security import generate_password_hash as _gen_hash
+
+import instance_config as _cfg
+
+_WEAK_PASSWORDS = {'admin', 'password', '123456', 'cambia-esta-contrasena', 'changeme'}
+
+def generate_password_hash(password):
+    return _gen_hash(password, method='pbkdf2:sha256')
+
+# Ruta de la base: DATABASE_PATH en el .env (por defecto papia_crm.db junto a este archivo)
+DATABASE = os.getenv('DATABASE_PATH') or os.path.join(os.path.dirname(__file__), 'papia_crm.db')
+
+
+def get_db():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.executescript("""
+        CREATE TABLE IF NOT EXISTS organizations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            slug TEXT UNIQUE NOT NULL,
+            plan TEXT NOT NULL DEFAULT 'starter',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS org_modules (
+            org_id  INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            module  TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (org_id, module)
+        );
+
+        CREATE TABLE IF NOT EXISTS clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT,
+            company TEXT,
+            project_type TEXT NOT NULL,
+            project_details TEXT,
+            pipeline_stage TEXT NOT NULL DEFAULT 'new_lead',
+            total_cost REAL NOT NULL DEFAULT 0,
+            amount_paid REAL NOT NULL DEFAULT 0,
+            brochure_sent INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL,
+            note_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS follow_ups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL,
+            method TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            result TEXT,
+            next_date DATE,
+            next_at DATETIME,
+            reminder_comment TEXT,
+            completed INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            description TEXT,
+            payment_date DATE DEFAULT (date('now')),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS whatsapp_messages (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id     INTEGER REFERENCES clients(id),
+            phone         TEXT NOT NULL,
+            direction     TEXT NOT NULL,
+            message       TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'received',
+            wa_message_id TEXT,
+            created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_wa_phone     ON whatsapp_messages(phone);
+        CREATE INDEX IF NOT EXISTS idx_wa_status    ON whatsapp_messages(status);
+        CREATE INDEX IF NOT EXISTS idx_wa_client    ON whatsapp_messages(client_id);
+
+        CREATE TABLE IF NOT EXISTS emails (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id        INTEGER REFERENCES clients(id),
+            direction        TEXT NOT NULL DEFAULT 'sent',
+            to_email         TEXT NOT NULL DEFAULT '',
+            subject          TEXT NOT NULL,
+            body             TEXT NOT NULL,
+            gmail_message_id TEXT,
+            status           TEXT NOT NULL DEFAULT 'sent',
+            created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS email_templates (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            subject    TEXT NOT NULL,
+            body       TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS gmail_tokens (
+            id            INTEGER PRIMARY KEY DEFAULT 1,
+            access_token  TEXT,
+            refresh_token TEXT,
+            updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS proposals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+            client_name TEXT NOT NULL,
+            business_name TEXT,
+            email TEXT NOT NULL,
+            phone TEXT,
+            address TEXT,
+            title TEXT NOT NULL,
+            project_type TEXT NOT NULL,
+            proposal_language TEXT NOT NULL DEFAULT 'en',
+            proposal_purpose TEXT NOT NULL DEFAULT 'landing_page',
+            project_description TEXT,
+            client_needs TEXT,
+            project_objective TEXT,
+            selected_services TEXT NOT NULL DEFAULT '[]',
+            subtotal REAL NOT NULL DEFAULT 0,
+            discount REAL NOT NULL DEFAULT 0,
+            taxes REAL NOT NULL DEFAULT 0,
+            total REAL NOT NULL DEFAULT 0,
+            initial_payment REAL NOT NULL DEFAULT 0,
+            remaining_balance REAL NOT NULL DEFAULT 0,
+            payment_terms TEXT,
+            payment_schedule TEXT,
+            payment_methods TEXT,
+            start_date DATE,
+            estimated_delivery_date DATE,
+            business_days INTEGER NOT NULL DEFAULT 0,
+            milestones TEXT NOT NULL DEFAULT '[]',
+            terms_and_conditions TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'draft',
+            pdf_url TEXT,
+            email_draft_id INTEGER,
+            sent_at DATETIME,
+            accepted_via_whatsapp_at DATETIME,
+            whatsapp_acceptance_link TEXT,
+            client_approval_status TEXT NOT NULL DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS email_drafts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposal_id INTEGER REFERENCES proposals(id) ON DELETE SET NULL,
+            client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+            to_email TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            body TEXT NOT NULL,
+            attachment_name TEXT,
+            attachment_url TEXT,
+            status TEXT NOT NULL DEFAULT 'ready_to_send',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            display_name  TEXT NOT NULL DEFAULT '',
+            role          TEXT NOT NULL DEFAULT 'user',
+            is_active     INTEGER NOT NULL DEFAULT 1,
+            created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS user_modules (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            module  TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (user_id, module)
+        );
+
+        CREATE TABLE IF NOT EXISTS internal_chat_messages (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id         INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            sender_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            sender_name    TEXT NOT NULL,
+            sender_role    TEXT NOT NULL DEFAULT 'user',
+            message        TEXT NOT NULL,
+            broadcast_id   TEXT,
+            created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS internal_chat_reads (
+            user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            org_id               INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            last_read_message_id INTEGER NOT NULL DEFAULT 0,
+            updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, org_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS internal_direct_messages (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id            INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            sender_user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            sender_name       TEXT NOT NULL,
+            sender_role       TEXT NOT NULL DEFAULT 'user',
+            message           TEXT NOT NULL,
+            created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS internal_direct_reads (
+            user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            peer_user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            last_read_message_id INTEGER NOT NULL DEFAULT 0,
+            updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, peer_user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS internal_user_presence (
+            user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            status     TEXT NOT NULL DEFAULT 'available',
+            last_seen  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS internal_chat_attachments (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id            INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            conversation_type TEXT NOT NULL,
+            message_id        INTEGER NOT NULL,
+            uploader_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            original_name     TEXT NOT NULL,
+            stored_name       TEXT NOT NULL,
+            mime_type         TEXT,
+            file_size         INTEGER NOT NULL DEFAULT 0,
+            created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at        DATETIME NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS internal_chat_permissions (
+            user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            org_id            INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            can_write_general INTEGER NOT NULL DEFAULT 0,
+            updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, org_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS internal_chat_reactions (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_type TEXT NOT NULL,
+            message_id        INTEGER NOT NULL,
+            user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            emoji             TEXT NOT NULL,
+            created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(conversation_type, message_id, user_id, emoji)
+        );
+
+        CREATE TABLE IF NOT EXISTS internal_chat_reaction_events (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_type TEXT NOT NULL,
+            message_id        INTEGER NOT NULL,
+            org_id            INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            emoji             TEXT NOT NULL,
+            active            INTEGER NOT NULL DEFAULT 1,
+            created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_internal_chat_org
+            ON internal_chat_messages(org_id, id);
+        CREATE INDEX IF NOT EXISTS idx_internal_chat_sender
+            ON internal_chat_messages(sender_user_id);
+        CREATE INDEX IF NOT EXISTS idx_internal_direct_pair
+            ON internal_direct_messages(sender_user_id, recipient_user_id, id);
+        CREATE INDEX IF NOT EXISTS idx_internal_direct_recipient
+            ON internal_direct_messages(recipient_user_id, id);
+        CREATE INDEX IF NOT EXISTS idx_internal_attach_msg
+            ON internal_chat_attachments(conversation_type, message_id);
+        CREATE INDEX IF NOT EXISTS idx_internal_attach_expiry
+            ON internal_chat_attachments(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_internal_reactions_msg
+            ON internal_chat_reactions(conversation_type, message_id);
+        CREATE INDEX IF NOT EXISTS idx_internal_reaction_events_sync
+            ON internal_chat_reaction_events(conversation_type, org_id, created_at, message_id);
+
+        CREATE TABLE IF NOT EXISTS payment_links (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id         INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            stripe_session_id TEXT,
+            stripe_link_url   TEXT NOT NULL,
+            amount            REAL NOT NULL,
+            currency          TEXT NOT NULL DEFAULT 'usd',
+            description       TEXT,
+            status            TEXT NOT NULL DEFAULT 'pending',
+            paid_at           DATETIME,
+            created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_payment_links_client  ON payment_links(client_id);
+        CREATE INDEX IF NOT EXISTS idx_payment_links_session ON payment_links(stripe_session_id);
+        CREATE TABLE IF NOT EXISTS meta_channel_connections (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id            INTEGER NOT NULL DEFAULT 1,
+            channel           TEXT NOT NULL,
+            page_id           TEXT NOT NULL,
+            page_name         TEXT,
+            page_access_token TEXT NOT NULL,
+            is_active         INTEGER NOT NULL DEFAULT 1,
+            created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(org_id, channel, page_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS meta_messages (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id          INTEGER NOT NULL DEFAULT 1,
+            client_id       INTEGER REFERENCES clients(id),
+            channel         TEXT NOT NULL,
+            sender_id       TEXT NOT NULL,
+            page_id         TEXT NOT NULL DEFAULT '',
+            direction       TEXT NOT NULL,
+            message         TEXT NOT NULL,
+            meta_message_id TEXT,
+            status          TEXT NOT NULL DEFAULT 'received',
+            created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_meta_msg_sender ON meta_messages(sender_id);
+        CREATE INDEX IF NOT EXISTS idx_meta_msg_org    ON meta_messages(org_id);
+        CREATE INDEX IF NOT EXISTS idx_meta_msg_client ON meta_messages(client_id);
+
+        -- WhatsApp vía Zernio: teléfono → conversationId de Zernio
+        CREATE TABLE IF NOT EXISTS whatsapp_conversations (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id                 INTEGER NOT NULL DEFAULT 1,
+            phone                  TEXT NOT NULL,
+            zernio_conversation_id TEXT NOT NULL,
+            last_inbound_at        DATETIME,
+            updated_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(org_id, phone)
+        );
+        CREATE TABLE IF NOT EXISTS client_vault_pins (
+            client_id       INTEGER PRIMARY KEY REFERENCES clients(id) ON DELETE CASCADE,
+            org_id          INTEGER NOT NULL DEFAULT 1,
+            pin_hash        TEXT NOT NULL,
+            failed_attempts INTEGER NOT NULL DEFAULT 0,
+            locked_until    TEXT,
+            created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS client_credentials (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id   INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            org_id      INTEGER NOT NULL DEFAULT 1,
+            data_enc    TEXT NOT NULL,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_cred_client ON client_credentials(client_id);
+        CREATE TABLE IF NOT EXISTS vault_access_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id   INTEGER NOT NULL,
+            org_id      INTEGER NOT NULL DEFAULT 1,
+            user_id     INTEGER,
+            username    TEXT,
+            action      TEXT NOT NULL,
+            ip          TEXT,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_wa_msgid ON whatsapp_messages(wa_message_id);
+        CREATE INDEX IF NOT EXISTS idx_emails_client ON emails(client_id);
+        CREATE INDEX IF NOT EXISTS idx_proposals_client ON proposals(client_id);
+        CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
+        CREATE INDEX IF NOT EXISTS idx_email_drafts_proposal ON email_drafts(proposal_id);
+    """)
+
+    conn.commit()
+
+    # ── Seed la organización principal (org_id=1) con la marca de la instancia ──
+    brand = _cfg.brand()
+    if not conn.execute("SELECT 1 FROM organizations WHERE id=1").fetchone():
+        slug = re.sub(r'[^a-z0-9]+', '-', brand['short_name'].lower()).strip('-') or 'main'
+        conn.execute(
+            "INSERT INTO organizations (id, name, slug, plan) VALUES (1, ?, ?, 'enterprise')",
+            (brand['company_name'], slug),
+        )
+        conn.commit()
+
+    # ── Seed org_modules: activos los de business.json → modules ─────────────
+    _ORG_MODULES = ['whatsapp', 'messenger', 'instagram', 'emails', 'calendar', 'proposals', 'contracts', 'tasks', 'chat']
+    # Contratos nace activo también en instancias cuyo business.json es anterior al módulo
+    _enabled = set(_cfg.modules()) | {'contracts'}
+    for org_row in conn.execute("SELECT id FROM organizations").fetchall():
+        for mod in _ORG_MODULES:
+            conn.execute(
+                "INSERT OR IGNORE INTO org_modules (org_id, module, enabled) VALUES (?, ?, ?)",
+                (org_row['id'], mod, 1 if mod in _enabled else 0),
+            )
+    conn.commit()
+
+    # ── Multi-tenant migrations: add org_id columns ───────────────────────────
+    migrations = [
+        "ALTER TABLE clients ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE follow_ups ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE whatsapp_messages ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE emails ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE email_templates ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE proposals ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE gmail_tokens ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE settings ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE clients ADD COLUMN source TEXT DEFAULT ''",
+        "ALTER TABLE follow_ups ADD COLUMN next_at DATETIME",
+        "ALTER TABLE follow_ups ADD COLUMN reminder_comment TEXT",
+        "ALTER TABLE organizations ADD COLUMN stripe_secret_key TEXT DEFAULT ''",
+        "ALTER TABLE organizations ADD COLUMN stripe_webhook_secret TEXT DEFAULT ''",
+        "ALTER TABLE organizations ADD COLUMN app_base_url TEXT DEFAULT ''",
+        "ALTER TABLE organizations ADD COLUMN gmail_client_id TEXT DEFAULT ''",
+        "ALTER TABLE organizations ADD COLUMN gmail_client_secret TEXT DEFAULT ''",
+        "ALTER TABLE organizations ADD COLUMN logo_url TEXT DEFAULT ''",
+        "ALTER TABLE organizations ADD COLUMN sort_order INTEGER DEFAULT 0",
+        "ALTER TABLE payment_links ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1",
+    ]
+    for sql in migrations:
+        try:
+            conn.execute(sql)
+            conn.commit()
+        except Exception:
+            pass
+
+    proposal_columns = [
+        ("proposal_language", "TEXT NOT NULL DEFAULT 'en'"),
+        ("proposal_purpose", "TEXT NOT NULL DEFAULT 'landing_page'"),
+        ("pdf_url", "TEXT"),
+        ("email_draft_id", "INTEGER"),
+        ("sent_at", "DATETIME"),
+        ("accepted_via_whatsapp_at", "DATETIME"),
+        ("whatsapp_acceptance_link", "TEXT"),
+        ("client_approval_status", "TEXT NOT NULL DEFAULT 'pending'"),
+    ]
+    for column, definition in proposal_columns:
+        try:
+            conn.execute(f"ALTER TABLE proposals ADD COLUMN {column} {definition}")
+            conn.commit()
+        except Exception:
+            pass
+
+    # ── Seed default email templates (con la marca de la instancia) ────────────
+    existing = conn.execute("SELECT COUNT(*) FROM email_templates").fetchone()[0]
+    if existing == 0:
+        firma = f"{brand['owner_name']}\n{brand['legal_name']}"
+        conn.executemany(
+            "INSERT INTO email_templates (name, subject, body) VALUES (?, ?, ?)",
+            [
+                (
+                    'Saludo inicial',
+                    f"Hola {{nombre}}, bienvenido a {brand['short_name']}",
+                    f"Hola {{nombre}},\n\nMi nombre es {brand['owner_first_name']} y soy parte del equipo de {brand['legal_name']}.\n\nNos alegra mucho que estés considerando trabajar con nosotros.\n\nMe gustaría agendar una llamada para entender mejor tus necesidades y cómo podemos ayudarte.\n\n¿Tienes disponibilidad esta semana?\n\nQuedo atento,\n{firma}",
+                ),
+                (
+                    'Envío de propuesta',
+                    f"Propuesta — {brand['company_name']}",
+                    f"Hola {{nombre}},\n\nEspero que estés muy bien. Tal como conversamos, adjunto la propuesta detallada.\n\nEn ella encontrarás:\n• Alcance y entregables\n• Cronograma estimado\n• Inversión total\n\nQuedo disponible para resolver cualquier duda o hacer ajustes según tus necesidades.\n\nSaludos,\n{firma}",
+                ),
+                (
+                    'Follow-up',
+                    f"Seguimiento — {brand['company_name']}",
+                    f"Hola {{nombre}},\n\nEspero que todo esté marchando bien. Quería dar seguimiento a nuestra conversación y ver si tuviste oportunidad de revisar la información que te compartí.\n\nEstoy aquí para responder cualquier pregunta o brindar información adicional que necesites para tomar una decisión.\n\n¿Hay algo en lo que pueda ayudarte?\n\nSaludos,\n{firma}",
+                ),
+                (
+                    'Recordatorio de pago',
+                    f"Recordatorio de pago — {brand['company_name']}",
+                    f"Hola {{nombre}},\n\nEspero que estés bien. Te escribimos para recordarte que tienes un saldo pendiente con nosotros.\n\nSi ya realizaste el pago, por favor ignora este mensaje. De lo contrario, te agradecería que te pongas en contacto para coordinar el método de pago más conveniente para ti.\n\nQuedamos a tu disposición.\n\nSaludos,\n{firma}",
+                ),
+            ]
+        )
+        conn.commit()
+
+    # ── Seed users ───────────────────────────────────────────────────────────
+    ALL_MODULES = ['whatsapp', 'messenger', 'instagram', 'emails', 'calendar', 'proposals', 'contracts', 'tasks', 'chat']
+
+    # Chat is enabled by default for existing users because it is an
+    # organization-wide communication channel.
+    conn.execute("""
+        INSERT OR IGNORE INTO user_modules (user_id, module, enabled)
+        SELECT id, 'chat', 1 FROM users
+    """)
+    conn.commit()
+
+    admin_user = os.getenv('ADMIN_USERNAME', 'admin').strip()
+    admin_pass = os.getenv('ADMIN_PASSWORD', '').strip()
+    exists = conn.execute("SELECT 1 FROM users WHERE username=?", (admin_user,)).fetchone()
+    if not exists and (not admin_pass or admin_pass in _WEAK_PASSWORDS):
+        logging.getLogger(__name__).error(
+            'No se creó el superadmin: define ADMIN_PASSWORD (segura) en el .env y recarga la app.')
+    elif not exists:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, display_name, role, org_id) VALUES (?, ?, 'Admin', 'superadmin', 1)",
+            (admin_user, generate_password_hash(admin_pass)),
+        )
+        conn.commit()
+    else:
+        # Migrate existing admin to superadmin if they are currently 'admin'
+        conn.execute(
+            "UPDATE users SET role='superadmin', org_id=1 WHERE username=? AND role='admin'",
+            (admin_user,),
+        )
+        conn.commit()
+
+    # (La plantilla ya no crea el usuario de prueba 'Testing'.)
+
+    # ── Seed default company settings ────────────────────────────────────────
+    defaults = [
+        ('company_logo_url',  ''),
+        ('signature_name',    brand.get('owner_name', '')),
+        ('signature_title',   brand.get('owner_title', '')),
+        ('signature_phone',   brand.get('whatsapp_display', '')),
+        ('signature_email',   brand.get('contact_email', '')),
+        ('signature_website', brand.get('website', '')),
+    ]
+    for key, value in defaults:
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value)
+        )
+    conn.commit()
+
+    conn.close()

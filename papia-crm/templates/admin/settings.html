@@ -1,0 +1,469 @@
+{% extends "base.html" %}
+{% block title %}Configuración del sistema{% endblock %}
+
+{% block head %}
+<style>
+.mod-toggle { position:relative; display:inline-block; width:36px; height:20px; }
+.mod-toggle input { opacity:0; width:0; height:0; }
+.mod-slider {
+  position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0;
+  background:var(--c-border-2); border-radius:20px; transition:.2s;
+}
+.mod-slider:before {
+  content:''; position:absolute; height:14px; width:14px; left:3px; bottom:3px;
+  background:#fff; border-radius:50%; transition:.2s;
+}
+input:checked + .mod-slider { background:var(--c-accent); }
+input:checked + .mod-slider:before { transform:translateX(16px); }
+.user-card {
+  background:var(--c-surface); border:1px solid var(--c-border);
+  border-radius:var(--radius); padding:20px 24px; margin-bottom:16px;
+}
+.user-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.user-avatar {
+  width:36px; height:36px; border-radius:50%;
+  background:linear-gradient(135deg,#2A5BFF,#8B5CF6);
+  color:#fff; font-weight:700; font-size:14px;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.mod-grid { display:flex; flex-wrap:wrap; gap:10px; }
+.mod-item {
+  display:flex; align-items:center; gap:8px;
+  padding:7px 12px; border-radius:var(--radius-sm);
+  border:1px solid var(--c-border); background:var(--c-bg);
+  font-size:12.5px; font-weight:500; color:var(--c-text-2);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pg-header">
+  <div>
+    <h1 class="pg-title">Configuración del sistema</h1>
+    <p style="font-size:13px;color:var(--c-text-3);margin:4px 0 0;">Gestiona usuarios y permisos de módulos</p>
+  </div>
+  <div class="pg-actions">
+    <button class="btn-md btn-primary" data-bs-toggle="modal" data-bs-target="#newUserModal">
+      <i class="bi bi-person-plus"></i> Nuevo usuario
+    </button>
+  </div>
+</div>
+
+<!-- ── Gmail Settings ── -->
+<div style="max-width:800px;margin-bottom:24px;">
+  <div class="section-card">
+    <div class="section-head">
+      <span class="section-head-label">
+        <i class="bi bi-envelope-at" style="color:#EA4335;margin-right:6px;"></i>Gmail OAuth2
+      </span>
+      {% if gmail_configured %}
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;
+                     color:var(--c-success);background:rgba(22,163,74,.1);padding:2px 8px;border-radius:99px;">
+          <i class="bi bi-check-circle-fill"></i> Configurado
+        </span>
+      {% else %}
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;
+                     color:var(--c-text-3);background:var(--c-bg);padding:2px 8px;
+                     border-radius:99px;border:1px solid var(--c-border);">
+          <i class="bi bi-x-circle"></i> No configurado
+        </span>
+      {% endif %}
+    </div>
+
+    <form method="POST" action="{{ url_for('admin.save_gmail') }}"
+          style="padding:16px 20px;display:flex;flex-direction:column;gap:14px;">
+
+      <!-- Alert: org_internal fix -->
+      <div style="display:flex;gap:10px;padding:10px 14px;border-radius:var(--radius-sm);
+                  background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.25);">
+        <i class="bi bi-exclamation-triangle-fill" style="color:#ca8a04;font-size:15px;flex-shrink:0;margin-top:1px;"></i>
+        <div style="font-size:12px;color:var(--c-text-2);line-height:1.6;">
+          <strong>Si ves el error "org_internal"</strong> en Google: ve a
+          <a href="https://console.cloud.google.com" target="_blank" style="color:var(--c-accent);">Google Cloud Console</a>
+          → APIs & Services → <strong>OAuth consent screen</strong> → cambia User Type a
+          <strong>External</strong>. Luego agrega tu email como "Test user".
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div>
+          <label class="form-label">
+            Client ID
+            <span style="font-weight:400;color:var(--c-text-3);">(…apps.googleusercontent.com)</span>
+          </label>
+          <input type="password" name="gmail_client_id" class="form-control"
+                 placeholder="{% if gmail_configured %}{{ gmail_client_id_masked }}{% else %}xxxxx.apps.googleusercontent.com{% endif %}"
+                 autocomplete="off" />
+          <div class="form-text">
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--c-accent);">
+              Google Cloud Console
+            </a> → Credentials → OAuth 2.0 Client IDs
+          </div>
+        </div>
+        <div>
+          <label class="form-label">
+            Client Secret
+            <span style="font-weight:400;color:var(--c-text-3);">(GOCSPX-...)</span>
+          </label>
+          <input type="password" name="gmail_client_secret" class="form-control"
+                 placeholder="{% if gmail_configured %}{{ gmail_client_secret_masked }}{% else %}GOCSPX-...{% endif %}"
+                 autocomplete="off" />
+          <div class="form-text">En el mismo Client ID, al hacer clic en "Edit".</div>
+        </div>
+      </div>
+
+      <div style="padding:10px 14px;border-radius:var(--radius-sm);background:var(--c-bg);border:1px solid var(--c-border);">
+        <div style="font-size:11.5px;font-weight:600;color:var(--c-text-3);margin-bottom:4px;">
+          <i class="bi bi-link-45deg"></i> Authorized Redirect URI — copia esto en Google Cloud Console:
+        </div>
+        <code style="font-size:12px;color:var(--c-accent);word-break:break-all;">{{ gmail_redirect_uri }}</code>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;">
+        <button type="submit" class="btn-wa-send" style="background:#EA4335;">
+          <i class="bi bi-check-lg"></i> Guardar credenciales de Gmail
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Stripe Settings ── -->
+<div style="max-width:800px;margin-bottom:24px;">
+  <div class="section-card">
+    <div class="section-head">
+      <span class="section-head-label">
+        <i class="bi bi-credit-card" style="color:#635BFF;margin-right:6px;"></i>Pagos con Stripe
+      </span>
+      {% if stripe_configured %}
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;
+                     color:var(--c-success);background:rgba(22,163,74,.1);padding:2px 8px;
+                     border-radius:99px;">
+          <i class="bi bi-check-circle-fill"></i> Conectado
+        </span>
+      {% else %}
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;
+                     color:var(--c-text-3);background:var(--c-bg);padding:2px 8px;
+                     border-radius:99px;border:1px solid var(--c-border);">
+          <i class="bi bi-x-circle"></i> No configurado
+        </span>
+      {% endif %}
+    </div>
+
+    <form method="POST" action="{{ url_for('admin.save_stripe') }}"
+          style="padding:16px 20px;display:flex;flex-direction:column;gap:14px;">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div>
+          <label class="form-label">
+            Secret Key
+            <span style="font-weight:400;color:var(--c-text-3);">(sk_live_... o sk_test_...)</span>
+          </label>
+          <input type="password" name="stripe_secret_key" class="form-control"
+                 placeholder="{% if stripe_configured %}{{ stripe_secret_key_masked }}{% else %}sk_live_...{% endif %}"
+                 autocomplete="off" />
+          <div class="form-text">Obtenla en dashboard.stripe.com → Developers → API keys</div>
+        </div>
+        <div>
+          <label class="form-label">
+            Webhook Secret
+            <span style="font-weight:400;color:var(--c-text-3);">(whsec_...)</span>
+          </label>
+          <input type="password" name="stripe_webhook_secret" class="form-control"
+                 placeholder="{% if stripe_configured %}{{ stripe_webhook_secret_masked }}{% else %}whsec_...{% endif %}"
+                 autocomplete="off" />
+          <div class="form-text">Webhook URL: <code>{{ app_base_url or 'https://tu-dominio.com' }}/webhook/stripe</code></div>
+        </div>
+      </div>
+
+      <div>
+        <label class="form-label">URL base del sitio</label>
+        <input type="url" name="app_base_url" class="form-control"
+               value="{{ app_base_url }}"
+               placeholder="https://tu-dominio.com" />
+        <div class="form-text">Usada para las URLs de éxito/cancelación del checkout de Stripe.</div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;">
+        <button type="submit" class="btn-wa-send" style="background:#635BFF;">
+          <i class="bi bi-check-lg"></i> Guardar configuración de Stripe
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Meta Settings -->
+<div style="max-width:800px;margin-bottom:24px;">
+  <div class="section-card">
+    <div class="section-head">
+      <span class="section-head-label">
+        <i class="bi bi-meta" style="color:#0084FF;margin-right:6px;"></i>Messenger e Instagram
+      </span>
+      <span style="font-size:11.5px;color:var(--c-text-3);">
+        {{ meta_connections | length }} canal{{ 'es' if meta_connections | length != 1 else '' }}
+      </span>
+    </div>
+
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px;">
+      <div style="display:flex;gap:10px;padding:10px 14px;border-radius:var(--radius-sm);
+                  background:rgba(42,91,255,.06);border:1px solid rgba(42,91,255,.18);">
+        <i class="bi bi-info-circle-fill" style="color:var(--c-accent);font-size:15px;flex-shrink:0;margin-top:1px;"></i>
+        <div style="font-size:12px;color:var(--c-text-2);line-height:1.6;">
+          Webhook para Meta:
+          <code>{{ request.url_root.rstrip('/') }}/webhook/meta</code>.
+          Usa tu <code>META_VERIFY_TOKEN</code> y activa eventos de mensajes para Messenger e Instagram.
+        </div>
+      </div>
+
+      {% if meta_connections %}
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        {% for conn in meta_connections %}
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--c-border);
+                    border-radius:var(--radius-sm);background:var(--c-bg);">
+          <i class="bi {{ 'bi-messenger' if conn.channel == 'messenger' else 'bi-instagram' }}"
+             style="font-size:15px;color:{{ '#0084FF' if conn.channel == 'messenger' else '#E1306C' }};"></i>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:650;color:var(--c-text);">
+              {{ conn.page_name or conn.page_id }}
+            </div>
+            <div style="font-size:11.5px;color:var(--c-text-3);">
+              {{ conn.channel | capitalize }} · ID <span class="num">{{ conn.page_id }}</span>
+            </div>
+          </div>
+          <span style="font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:99px;
+                       {% if conn.is_active %}background:rgba(22,163,74,.1);color:var(--c-success);
+                       {% else %}background:rgba(220,38,38,.1);color:var(--c-danger);{% endif %}">
+            {{ 'Activo' if conn.is_active else 'Inactivo' }}
+          </span>
+          <form method="POST" action="{{ url_for('admin.toggle_meta_connection', connection_id=conn.id) }}" style="margin:0;">
+            <button type="submit" class="btn btn-ghost btn-xs">
+              {{ 'Pausar' if conn.is_active else 'Activar' }}
+            </button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('admin.save_meta_connection') }}"
+            style="display:grid;grid-template-columns:150px 1fr 1fr;gap:12px;align-items:end;">
+        <div>
+          <label class="form-label">Canal</label>
+          <select name="channel" class="form-select">
+            <option value="messenger">Messenger</option>
+            <option value="instagram">Instagram</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Page / IG ID</label>
+          <input type="text" name="page_id" class="form-control" required placeholder="ID de página o cuenta IG" />
+        </div>
+        <div>
+          <label class="form-label">Nombre</label>
+          <input type="text" name="page_name" class="form-control" placeholder="Ej: {{ brand.short_name }}" />
+        </div>
+        <div style="grid-column:1 / -1;">
+          <label class="form-label">Access Token</label>
+          <input type="password" name="page_access_token" class="form-control" required placeholder="EAAG..." autocomplete="off" />
+          <div class="form-text">Se usa para responder mensajes desde el CRM mediante Meta Send API.</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--c-text-2);">
+          <input type="checkbox" name="is_active" checked />
+          Activo
+        </label>
+        <div style="grid-column:2 / -1;display:flex;justify-content:flex-end;">
+          <button type="submit" class="btn-wa-send" style="background:#0084FF;">
+            <i class="bi bi-check-lg"></i> Guardar canal Meta
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div style="max-width:800px;">
+  {% for user in users %}
+  <div class="user-card">
+    <div class="user-card-header">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="user-avatar">{{ user.display_name[0] | upper }}</div>
+        <div>
+          <div style="font-weight:700;font-size:14px;color:var(--c-text);">{{ user.display_name }}</div>
+          <div style="font-size:12px;color:var(--c-text-3);">
+            @{{ user.username }}
+            <span style="margin-left:8px;padding:2px 7px;border-radius:99px;font-size:10.5px;font-weight:600;
+                  background:{% if user.role == 'superadmin' %}rgba(168,85,247,.15);color:#a855f7
+                  {% elif user.role == 'admin' %}rgba(42,91,255,.1);color:var(--c-accent)
+                  {% else %}rgba(16,185,129,.1);color:#059669{% endif %};">
+              {{ user.role }}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn-icon-xs" title="Cambiar contraseña"
+                onclick="openResetPwd({{ user.id }}, '{{ user.username }}')">
+          <i class="bi bi-key"></i>
+        </button>
+        {% if user.role not in ('admin', 'superadmin') %}
+        <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.id) }}"
+              onsubmit="return confirm('¿Eliminar al usuario {{ user.username }}?')">
+          <button type="submit" class="btn-icon-xs" style="color:var(--c-danger);" title="Eliminar">
+            <i class="bi bi-trash"></i>
+          </button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if user.role in ('admin', 'superadmin') %}
+    <!-- Admin: read-only view of org-enabled modules (set by superadmin) -->
+    <div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;
+                letter-spacing:.05em;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+      <i class="bi bi-shield-lock" style="color:var(--c-accent);font-size:13px;"></i>
+      Módulos habilitados por el administrador para esta organización
+    </div>
+    <div class="mod-grid">
+      {% if org_modules %}
+        {% for mod_key, mod_label, mod_icon in org_modules %}
+        <div class="mod-item" style="opacity:1;cursor:default;">
+          <i class="bi {{ mod_icon }}" style="font-size:14px;color:var(--c-accent);"></i>
+          <span>{{ mod_label }}</span>
+          <i class="bi bi-check-circle-fill" style="font-size:12px;color:var(--c-accent);margin-left:2px;"></i>
+        </div>
+        {% endfor %}
+      {% else %}
+        <span style="font-size:12.5px;color:var(--c-text-3);font-style:italic;">
+          Ningún módulo habilitado aún. Contacta al administrador.
+        </span>
+      {% endif %}
+    </div>
+    {% else %}
+    <!-- User: toggles restricted to org-enabled modules -->
+    <div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;
+                letter-spacing:.05em;margin-bottom:10px;">
+      Acceso a módulos
+    </div>
+    {% if all_modules %}
+    <div class="mod-grid">
+      {% for mod_key, mod_label, mod_icon in all_modules %}
+      {% set is_enabled = modules_by_user.get(user.id, {}).get(mod_key, 0) %}
+      <div class="mod-item">
+        <i class="bi {{ mod_icon }}" style="font-size:14px;{% if is_enabled %}color:var(--c-accent){% endif %}"></i>
+        <span>{{ mod_label }}</span>
+        <label class="mod-toggle" style="margin:0;">
+          <input type="checkbox"
+                 {% if is_enabled %}checked{% endif %}
+                 onchange="toggleModule({{ user.id }}, '{{ mod_key }}', this.checked)">
+          <span class="mod-slider"></span>
+        </label>
+      </div>
+      {% endfor %}
+    </div>
+    {% if 'chat' in enabled_modules %}
+    {% set can_write_chat = chat_permissions.get(user.id, 0) %}
+    <div class="mod-grid" style="margin-top:10px;">
+      <div class="mod-item">
+        <i class="bi bi-pencil-square" style="font-size:14px;{% if can_write_chat %}color:var(--c-accent){% endif %}"></i>
+        <span>Escribir en canal general</span>
+        <label class="mod-toggle" style="margin:0;">
+          <input type="checkbox"
+                 {% if can_write_chat %}checked{% endif %}
+                 onchange="toggleChatWrite({{ user.id }}, this.checked)">
+          <span class="mod-slider"></span>
+        </label>
+      </div>
+    </div>
+    {% endif %}
+    {% else %}
+    <span style="font-size:12.5px;color:var(--c-text-3);font-style:italic;">
+      Tu organización no tiene módulos habilitados. Contacta al administrador.
+    </span>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Modal: New user -->
+<div class="modal fade" id="newUserModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-person-plus me-2" style="color:var(--c-accent);"></i>Nuevo usuario</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" action="{{ url_for('admin.create_user') }}">
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <label class="form-label">Nombre visible</label>
+            <input type="text" name="display_name" class="form-control" placeholder="Ej: Juan Pérez" />
+          </div>
+          <div>
+            <label class="form-label">Usuario</label>
+            <input type="text" name="username" class="form-control" required placeholder="Ej: testing" />
+          </div>
+          <div>
+            <label class="form-label">Contraseña</label>
+            <input type="password" name="password" class="form-control" required placeholder="Mínimo 4 caracteres" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn-wa-send"><i class="bi bi-check-lg"></i> Crear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Reset password -->
+<div class="modal fade" id="resetPwdModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-key me-2" style="color:var(--c-accent);"></i>Cambiar contraseña</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="resetPwdForm" method="POST">
+        <div class="modal-body">
+          <p style="font-size:13px;color:var(--c-text-2);">Usuario: <strong id="resetPwdUsername"></strong></p>
+          <label class="form-label">Nueva contraseña</label>
+          <input type="password" name="new_password" class="form-control" required placeholder="Nueva contraseña" />
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn-wa-send"><i class="bi bi-check-lg"></i> Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function toggleModule(userId, module, enabled) {
+  await fetch(`/admin/users/${userId}/toggle-module`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ module, enabled }),
+  });
+}
+
+async function toggleChatWrite(userId, enabled) {
+  await fetch(`/admin/users/${userId}/toggle-chat-write`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+function openResetPwd(userId, username) {
+  document.getElementById('resetPwdUsername').textContent = username;
+  document.getElementById('resetPwdForm').action = `/admin/users/${userId}/reset-password`;
+  new bootstrap.Modal(document.getElementById('resetPwdModal')).show();
+}
+</script>
+{% endblock %}

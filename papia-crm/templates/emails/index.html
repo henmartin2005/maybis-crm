@@ -1,0 +1,543 @@
+{% extends "base.html" %}
+{% block title %}Emails{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<style>
+.main-content { padding: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.em-shell { display: flex; flex: 1; overflow: hidden; height: 100%; }
+
+/* ── LEFT PANEL ── */
+.em-left { width: 300px; flex-shrink: 0; border-right: 1px solid var(--c-border); display: flex; flex-direction: column; background: var(--c-surface); }
+.em-left-header { padding: 12px 14px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+.em-left-header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.em-left-title { font-size: 13px; font-weight: 700; color: var(--c-text); display: flex; align-items: center; gap: 7px; }
+.em-left-title i { color: var(--c-accent); font-size: 15px; }
+.em-header-btns { display: flex; gap: 4px; }
+
+/* Compose button */
+.em-compose-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 7px 12px; background: var(--c-accent); color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+.em-compose-btn:hover { opacity: .88; }
+.em-compose-btn i { font-size: 13px; }
+
+/* Search */
+.em-search { display: flex; align-items: center; gap: 7px; margin: 10px 14px 0; padding: 7px 10px; background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: 8px; }
+.em-search i { font-size: 14px; color: var(--c-text-3); flex-shrink: 0; }
+.em-search input { background: none; border: none; outline: none; font-size: 12.5px; color: var(--c-text); width: 100%; }
+.em-search input::placeholder { color: var(--c-text-3); }
+
+/* Filter chips */
+.em-filters { display: flex; gap: 5px; padding: 8px 14px; overflow-x: auto; flex-shrink: 0; scrollbar-width: none; }
+.em-filters::-webkit-scrollbar { display: none; }
+.em-chip { font-size: 11px; padding: 3px 10px; border-radius: 20px; border: 1px solid var(--c-border); color: var(--c-text-3); cursor: pointer; white-space: nowrap; background: transparent; transition: all .15s; }
+.em-chip:hover { background: var(--c-surface-2); color: var(--c-text); }
+.em-chip.active { background: rgba(42,91,255,.1); color: var(--c-accent); border-color: var(--c-accent); font-weight: 600; }
+
+/* Tabs */
+.em-tabs { display: flex; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+.em-tab-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 9px 6px; font-size: 12px; font-weight: 600; color: var(--c-text-3); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: color var(--t), border-color var(--t); }
+.em-tab-btn:hover { color: var(--c-text); }
+.em-tab-btn.active { color: var(--c-accent); border-bottom-color: var(--c-accent); }
+.em-tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--c-surface-2); font-size: 10px; font-weight: 700; color: var(--c-text-3); }
+.em-tab-btn.active .em-tab-badge { background: rgba(42,91,255,.12); color: var(--c-accent); }
+
+/* Email list */
+.em-convos { flex: 1; overflow-y: auto; }
+.em-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--c-border); text-decoration: none; color: inherit; transition: background var(--t); cursor: pointer; position: relative; }
+.em-item:hover { background: var(--c-surface-2); }
+.em-item.active { background: rgba(42,91,255,.06); border-right: 2px solid var(--c-accent); }
+.em-item.unread .em-item-name { font-weight: 700; }
+.em-item-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #2A5BFF, #8B5CF6); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.em-item-body { flex: 1; min-width: 0; }
+.em-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+.em-item-name { font-size: 13px; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.em-item-time { font-size: 10.5px; color: var(--c-text-3); white-space: nowrap; font-family: 'Geist Mono', monospace; }
+.em-item-subject { font-size: 11.5px; color: var(--c-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 1px; }
+.em-item-preview { font-size: 11px; color: var(--c-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .7; }
+.em-unread-dot { width: 7px; height: 7px; background: var(--c-accent); border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+
+.em-empty-left { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 40px 20px; color: var(--c-text-3); text-align: center; }
+.em-empty-left i { font-size: 28px; opacity: .35; }
+.em-empty-left p { font-size: 12.5px; margin: 0; }
+
+/* Sync spin */
+@keyframes em-spin { to { transform: rotate(360deg); } }
+.em-syncing { animation: em-spin .8s linear infinite; display: inline-block; }
+
+/* ── RIGHT PANEL ── */
+.em-right { flex: 1; display: flex; flex-direction: column; background: var(--c-bg); min-width: 0; }
+
+/* Empty state */
+.em-empty-right { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--c-text-3); }
+.em-empty-right i { font-size: 40px; opacity: .2; }
+.em-empty-right p { font-size: 13px; margin: 0; }
+.em-empty-compose { display: flex; align-items: center; gap: 6px; padding: 7px 16px; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 8px; font-size: 12px; color: var(--c-text-3); cursor: pointer; transition: all .15s; }
+.em-empty-compose:hover { border-color: var(--c-accent); color: var(--c-accent); }
+
+/* Detail header */
+.em-detail-header { padding: 12px 18px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+.em-detail-subject { font-size: 15px; font-weight: 700; color: var(--c-text); margin-bottom: 10px; }
+.em-detail-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+.em-action-btn { display: flex; align-items: center; gap: 5px; padding: 5px 10px; border: 1px solid var(--c-border); border-radius: 7px; background: transparent; font-size: 11.5px; color: var(--c-text-3); cursor: pointer; transition: all .15s; }
+.em-action-btn:hover { background: var(--c-surface-2); color: var(--c-text); }
+.em-action-btn i { font-size: 13px; }
+.em-action-btn.primary { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
+.em-action-btn.primary:hover { opacity: .88; }
+.em-action-btn.danger:hover { background: rgba(239,68,68,.1); color: #ef4444; border-color: #ef4444; }
+
+/* Sender info */
+.em-sender-bar { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+.em-sender-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #2A5BFF, #8B5CF6); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.em-sender-info { flex: 1; }
+.em-sender-name { font-size: 13px; font-weight: 600; color: var(--c-text); }
+.em-sender-meta { font-size: 11px; color: var(--c-text-3); }
+.em-tag { font-size: 10.5px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+.em-tag-lead { background: rgba(245,158,11,.12); color: #d97706; }
+.em-tag-client { background: rgba(34,197,94,.12); color: #16a34a; }
+
+/* Body */
+.em-body { flex: 1; padding: 18px; overflow-y: auto; font-size: 13.5px; color: var(--c-text); line-height: 1.7; }
+.em-body p { margin-bottom: 10px; }
+
+/* Attachments */
+.em-attachments { padding: 10px 18px; border-top: 1px solid var(--c-border); flex-shrink: 0; }
+.em-att-label { font-size: 11px; color: var(--c-text-3); margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+.em-att-list { display: flex; gap: 6px; flex-wrap: wrap; }
+.em-att-item { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 7px; font-size: 11.5px; color: var(--c-text-3); cursor: pointer; transition: all .15s; }
+.em-att-item:hover { border-color: var(--c-accent); color: var(--c-accent); }
+.em-att-item i { font-size: 14px; color: var(--c-accent); }
+
+/* Reply bar */
+.em-reply-bar { padding: 12px 18px; border-top: 1px solid var(--c-border); flex-shrink: 0; background: var(--c-surface); }
+.em-reply-top { display: flex; gap: 6px; margin-bottom: 8px; }
+.em-reply-tab { font-size: 11.5px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--c-border); background: transparent; color: var(--c-text-3); cursor: pointer; }
+.em-reply-tab.active { background: var(--c-accent); color: #fff; border-color: var(--c-accent); font-weight: 600; }
+.em-reply-row { display: flex; gap: 8px; align-items: flex-end; }
+.em-reply-input { flex: 1; background: var(--c-bg); border: 1px solid var(--c-border); border-radius: 8px; padding: 9px 12px; font-size: 13px; color: var(--c-text); resize: none; outline: none; font-family: inherit; min-height: 70px; transition: border-color .15s; }
+.em-reply-input:focus { border-color: var(--c-accent); }
+.em-reply-btns { display: flex; flex-direction: column; gap: 5px; }
+.em-reply-send { display: flex; align-items: center; gap: 5px; padding: 7px 14px; background: var(--c-accent); color: #fff; border: none; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+.em-reply-send:hover { opacity: .88; }
+.em-reply-ai { display: flex; align-items: center; gap: 5px; padding: 7px 14px; background: transparent; border: 1px solid var(--c-border); border-radius: 7px; font-size: 12px; color: var(--c-text-3); cursor: pointer; transition: all .15s; white-space: nowrap; }
+.em-reply-ai:hover { border-color: var(--c-accent); color: var(--c-accent); }
+
+/* Icon button */
+.em-icon-btn { width: 30px; height: 30px; border: 1px solid var(--c-border); border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--c-text-3); font-size: 14px; transition: all .15s; }
+.em-icon-btn:hover { background: var(--c-surface-2); color: var(--c-text); }
+
+/* Thread messages */
+.em-thread { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+.em-msg { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 10px; padding: 12px 14px; }
+.em-msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.em-msg-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #2A5BFF, #8B5CF6); color: #fff; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.em-msg-sender { font-size: 12.5px; font-weight: 600; color: var(--c-text); flex: 1; }
+.em-msg-time { font-size: 10.5px; color: var(--c-text-3); font-family: 'Geist Mono', monospace; }
+.em-msg-body { font-size: 13px; color: var(--c-text); line-height: 1.65; }
+.em-msg.sent { background: rgba(42,91,255,.05); border-color: rgba(42,91,255,.15); }
+.em-msg.sent .em-msg-avatar { background: linear-gradient(135deg, #10b981, #059669); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="em-shell">
+
+  <!-- ── LEFT PANEL ── -->
+  <div class="em-left">
+    <div class="em-left-header">
+      <div class="em-left-header-top">
+        <span class="em-left-title">
+          <i class="ph ph-envelope-simple"></i> Emails
+        </span>
+        <div class="em-header-btns">
+          <button class="em-icon-btn" id="syncBtn" onclick="syncEmails()" title="Sincronizar Gmail">
+            <i class="ph ph-arrows-clockwise" id="syncIcon"></i>
+          </button>
+          <button class="em-icon-btn" onclick="window.location='/emails/settings'" title="Configuración">
+            <i class="ph ph-gear"></i>
+          </button>
+        </div>
+      </div>
+      <button class="em-compose-btn" onclick="openCompose()">
+        <i class="ph ph-pencil-simple"></i> Redactar nuevo
+      </button>
+    </div>
+
+    <!-- Search -->
+    <div class="em-search">
+      <i class="ph ph-magnifying-glass"></i>
+      <input type="text" id="emailSearch" placeholder="Buscar emails..." oninput="filterEmails(this.value)" />
+    </div>
+
+    <!-- Filter chips -->
+    <div class="em-filters">
+      <button class="em-chip active" onclick="setChip(this,'all')">Todos</button>
+      <button class="em-chip" onclick="setChip(this,'unread')">No leídos</button>
+      <button class="em-chip" onclick="setChip(this,'attach')">Con adjuntos</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="em-tabs">
+      <button class="em-tab-btn active" onclick="switchTab(this,'recv')" id="tab-recv">
+        <i class="ph ph-tray"></i> Recibidos
+        <span class="em-tab-badge">{{ recv_convos|length }}</span>
+      </button>
+      <button class="em-tab-btn" onclick="switchTab(this,'sent')" id="tab-sent">
+        <i class="ph ph-paper-plane-tilt"></i> Enviados
+        <span class="em-tab-badge">{{ sent_convos|length }}</span>
+      </button>
+    </div>
+
+    <!-- Recibidos -->
+    <div class="em-convos" id="list-recv">
+      {% if not connected %}
+      <div class="em-empty-left">
+        <i class="ph ph-warning-circle"></i>
+        <p>Gmail no conectado</p>
+        <a href="/emails/auth" style="font-size:12px;color:var(--c-accent);">Conectar ahora →</a>
+      </div>
+      {% elif recv_convos %}
+        {% for c in recv_convos %}
+        <div class="em-item {% if active_id == c.client_id %}active{% endif %} {% if not c.read %}unread{% endif %}"
+             onclick="loadThread({{ c.client_id }})">
+          <div class="em-item-avatar">{{ (c.name or 'NN')[:2]|upper }}</div>
+          <div class="em-item-body">
+            <div class="em-item-top">
+              <span class="em-item-name">{{ c.name or c.email }}</span>
+              <span class="em-item-time">{{ c.last_time or '' }}</span>
+            </div>
+            <div class="em-item-subject">{{ c.subject or '(sin asunto)' }}</div>
+            <div class="em-item-preview">{{ c.preview or '' }}</div>
+          </div>
+          {% if not c.read %}<div class="em-unread-dot"></div>{% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="em-empty-left">
+        <i class="ph ph-tray"></i>
+        <p>Sin emails recibidos</p>
+        <p style="font-size:11px;">Usa <b>Sincronizar</b> para importar desde Gmail</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Enviados -->
+    <div class="em-convos" id="list-sent" style="display:none;">
+      {% if sent_convos %}
+        {% for c in sent_convos %}
+        <div class="em-item {% if (c.client_id and active_id == c.client_id) or (not c.client_id and active_email and active_email|lower == (c.email or '')|lower) %}active{% endif %}"
+             {% if c.client_id %}onclick="loadThread({{ c.client_id }})"{% else %}onclick="location.href='{{ url_for('emails.index', to=c.email) }}'"{% endif %}>
+          <div class="em-item-avatar" style="background:linear-gradient(135deg,#10b981,#059669)">
+            {{ (c.name or 'NN')[:2]|upper }}
+          </div>
+          <div class="em-item-body">
+            <div class="em-item-top">
+              <span class="em-item-name">{{ c.name or c.email }}</span>
+              <span class="em-item-time">{{ c.last_time or '' }}</span>
+            </div>
+            <div class="em-item-subject">{{ c.subject or '(sin asunto)' }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="em-empty-left">
+        <i class="ph ph-paper-plane-tilt"></i>
+        <p>Sin emails enviados</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── RIGHT PANEL ── -->
+  <div class="em-right" id="emRight">
+    {% if active_thread %}
+    <!-- Thread detail -->
+    <div class="em-detail-header">
+      <div class="em-detail-subject">{{ active_thread[0].subject or '(sin asunto)' }}</div>
+      <div class="em-detail-actions">
+        <button class="em-action-btn" onclick="archiveThread()" title="Archivar">
+          <i class="ph ph-archive"></i> Archivar
+        </button>
+        <button class="em-action-btn danger" onclick="markSpam()" title="Spam">
+          <i class="ph ph-prohibit"></i> Spam
+        </button>
+        <button class="em-action-btn" onclick="createTask()" title="Crear tarea">
+          <i class="ph ph-check-square"></i> Crear task
+        </button>
+        {% if active_client %}
+        <button class="em-action-btn" onclick="window.location='/clients/{{ active_client.id }}'" title="Ver cliente">
+          <i class="ph ph-user"></i> Ver cliente
+        </button>
+        {% else %}
+        <button class="em-action-btn primary" onclick="addClientFromEmail()">
+          <i class="ph ph-user-plus"></i> Agregar cliente
+        </button>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if active_client %}
+    <div class="em-sender-bar">
+      <div class="em-sender-avatar">{{ (active_client.first_name or 'NN')[:2]|upper }}</div>
+      <div class="em-sender-info">
+        <div class="em-sender-name">{{ active_client.first_name }} {{ active_client.last_name }}</div>
+        <div class="em-sender-meta">{{ active_client.email }} · {{ active_thread[0].date or 'Hoy' }}</div>
+      </div>
+      <span class="em-tag em-tag-client">Cliente</span>
+    </div>
+    {% else %}
+    <div class="em-sender-bar">
+      <div class="em-sender-avatar">{{ (active_thread[0].from_name or active_thread[0].from_email or 'NN')[:2]|upper }}</div>
+      <div class="em-sender-info">
+        <div class="em-sender-name">{{ active_thread[0].from_name or active_thread[0].from_email }}</div>
+        <div class="em-sender-meta">{{ active_thread[0].from_email }} · {{ active_thread[0].date or 'Hoy' }}</div>
+      </div>
+      <span class="em-tag em-tag-lead">Lead</span>
+    </div>
+    {% endif %}
+
+    <!-- Thread messages -->
+    <div class="em-thread" id="threadMessages">
+      {% for msg in active_thread %}
+      <div class="em-msg {% if msg.direction == 'sent' %}sent{% endif %}">
+        <div class="em-msg-header">
+          <div class="em-msg-avatar">
+            {% if msg.direction == 'sent' %}YO{% else %}{{ (msg.from_name or msg.from_email or 'NN')[:2]|upper }}{% endif %}
+          </div>
+          <span class="em-msg-sender">
+            {% if msg.direction == 'sent' %}Tú{% else %}{{ msg.from_name or msg.from_email }}{% endif %}
+          </span>
+          <span class="em-msg-time">{{ msg.date or '' }}</span>
+        </div>
+        <div class="em-msg-body">{{ msg.body_text or msg.body or '' }}</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Reply bar -->
+    <div class="em-reply-bar">
+      <div class="em-reply-top">
+        <button class="em-reply-tab active" onclick="setReplyTab(this,'reply')">Responder</button>
+        <button class="em-reply-tab" onclick="setReplyTab(this,'forward')">Reenviar</button>
+      </div>
+      <div class="em-reply-row">
+        <textarea class="em-reply-input" id="replyBody" placeholder="Escribe tu respuesta..."></textarea>
+        <div class="em-reply-btns">
+          <button class="em-reply-ai" onclick="generateAIReply()" title="Generar respuesta con IA">
+            <i class="ph ph-sparkle"></i> IA
+          </button>
+          <button class="em-reply-send" onclick="sendReply()">
+            <i class="ph ph-paper-plane-tilt"></i> Enviar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {% else %}
+    <!-- Empty state -->
+    <div class="em-empty-right">
+      <i class="ph ph-envelope-simple-open"></i>
+      <p>Selecciona una conversación</p>
+      <button class="em-empty-compose" onclick="openCompose()">
+        <i class="ph ph-pencil-simple"></i> redacta un nuevo email
+      </button>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- ── COMPOSE MODAL ── -->
+<div id="composeModal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.45);align-items:flex-end;justify-content:flex-end;padding:20px;">
+  <div style="width:480px;background:var(--c-surface);border:1px solid var(--c-border);border-radius:12px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--c-border);">
+      <span style="font-size:13px;font-weight:700;color:var(--c-text);">Nuevo email</span>
+      <button onclick="closeCompose()" style="background:none;border:none;cursor:pointer;color:var(--c-text-3);font-size:18px;"><i class="ph ph-x"></i></button>
+    </div>
+    <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;">
+      <input id="composeTo" type="text" list="composeClients" autocomplete="off"
+             placeholder="Para: elige un cliente o escribe cualquier email (varios separados por coma)"
+             value="{{ compose_preset.client_email if compose_preset and compose_preset.client_email else '' }}"
+             style="width:100%;padding:8px 10px;border:1px solid var(--c-border);border-radius:7px;background:var(--c-bg);color:var(--c-text);font-size:13px;outline:none;" />
+      <datalist id="composeClients">
+        {% for cl in all_clients %}{% if cl.email %}
+        <option value="{{ cl.email }}" data-id="{{ cl.id }}">{{ cl.first_name }} {{ cl.last_name }}</option>
+        {% endif %}{% endfor %}
+      </datalist>
+      <input id="composeSubject" type="text" placeholder="Asunto"
+             value="{{ compose_preset.subject if compose_preset else '' }}"
+             style="width:100%;padding:8px 10px;border:1px solid var(--c-border);border-radius:7px;background:var(--c-bg);color:var(--c-text);font-size:13px;outline:none;" />
+      <textarea id="composeBody" placeholder="Escribe tu mensaje..."
+                style="width:100%;min-height:140px;padding:9px 10px;border:1px solid var(--c-border);border-radius:7px;background:var(--c-bg);color:var(--c-text);font-size:13px;resize:vertical;outline:none;font-family:inherit;">{{ compose_preset.body if compose_preset else '' }}</textarea>
+      <div style="display:flex;gap:6px;justify-content:flex-end;">
+        <button class="em-reply-ai" onclick="generateAICompose()"><i class="ph ph-sparkle"></i> Generar con IA</button>
+        <button class="em-reply-send" onclick="sendCompose()"><i class="ph ph-paper-plane-tilt"></i> Enviar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Tab switching ──
+function switchTab(btn, tab) {
+  document.querySelectorAll('.em-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('list-recv').style.display = tab === 'recv' ? 'block' : 'none';
+  document.getElementById('list-sent').style.display = tab === 'sent' ? 'block' : 'none';
+}
+
+// ── Filter chips ──
+let currentChip = 'all';
+function setChip(btn, type) {
+  document.querySelectorAll('.em-chip').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentChip = type;
+  applyFilters();
+}
+
+// ── Search ──
+function filterEmails(q) { applyFilters(q); }
+
+function applyFilters(q) {
+  q = (q || document.getElementById('emailSearch').value).toLowerCase();
+  document.querySelectorAll('#list-recv .em-item, #list-sent .em-item').forEach(item => {
+    const name = (item.querySelector('.em-item-name')?.textContent || '').toLowerCase();
+    const subj = (item.querySelector('.em-item-subject')?.textContent || '').toLowerCase();
+    const matchSearch = !q || name.includes(q) || subj.includes(q);
+    const matchChip = currentChip === 'all' ||
+      (currentChip === 'unread' && item.classList.contains('unread')) ||
+      (currentChip === 'attach' && item.dataset.attach === '1');
+    item.style.display = (matchSearch && matchChip) ? 'flex' : 'none';
+  });
+}
+
+// ── Load thread ──
+function loadThread(clientId) {
+  window.location = '/emails?client_id=' + clientId;
+}
+
+// ── Sync ──
+function syncEmails() {
+  const icon = document.getElementById('syncIcon');
+  icon.classList.add('em-syncing');
+  fetch('/emails/sync', { method: 'POST', headers: {'X-CSRFToken': getCsrf()} })
+    .then(r => r.json())
+    .then(d => {
+      icon.classList.remove('em-syncing');
+      if (d.success) { location.reload(); }
+      else { alert('Error al sincronizar: ' + (d.error || '')); }
+    })
+    .catch(() => { icon.classList.remove('em-syncing'); });
+}
+
+// ── Reply tab ──
+function setReplyTab(btn, mode) {
+  document.querySelectorAll('.em-reply-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── Send reply ──
+function sendReply() {
+  const body = document.getElementById('replyBody').value.trim();
+  if (!body) return;
+  const clientId = {{ active_id or 'null' }};
+  const subject = '{{ active_thread[0].subject if active_thread else "" }}';
+  const toEmail = '{{ active_thread[0].from_email if active_thread else "" }}';
+  fetch('/emails/send', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({ to_email: toEmail, subject: 'Re: ' + subject, body: body, client_id: clientId })
+  }).then(r => r.json()).then(d => {
+    if (d.success) { document.getElementById('replyBody').value = ''; location.reload(); }
+    else { alert('Error: ' + (d.error || '')); }
+  });
+}
+
+// ── AI reply ──
+function generateAIReply() {
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ph ph-circle-notch em-syncing"></i> Generando...';
+  const lastMsg = document.querySelector('.em-msg:last-child .em-msg-body');
+  const context = lastMsg ? lastMsg.textContent.trim().slice(0, 400) : '';
+  fetch('/emails/ai-reply', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({ context })
+  }).then(r => r.json()).then(d => {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ph ph-sparkle"></i> IA';
+    if (d.reply) document.getElementById('replyBody').value = d.reply;
+  }).catch(() => { btn.disabled = false; btn.innerHTML = '<i class="ph ph-sparkle"></i> IA'; });
+}
+
+// ── Compose ──
+function openCompose() {
+  const m = document.getElementById('composeModal');
+  m.style.display = 'flex';
+}
+function closeCompose() {
+  document.getElementById('composeModal').style.display = 'none';
+}
+function sendCompose() {
+  const to = document.getElementById('composeTo').value.trim().replace(/[;,\s]+$/, '');
+  const subject = document.getElementById('composeSubject').value.trim();
+  const body = document.getElementById('composeBody').value.trim();
+  if (!to || !subject || !body) { alert('Completa todos los campos'); return; }
+  const addrs = to.split(/[,;]/).map(a => a.trim()).filter(Boolean);
+  const badAddr = addrs.find(a => !/^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$/.test(a));
+  if (!addrs.length || badAddr) { alert('Email no válido: ' + (badAddr || to)); return; }
+  const match = [...document.querySelectorAll('#composeClients option')]
+    .find(o => o.value.toLowerCase() === addrs[0].toLowerCase());
+  const clientId = match ? parseInt(match.dataset.id, 10) : null;
+  fetch('/emails/send', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({ to_email: addrs.join(', '), subject, body, client_id: clientId })
+  }).then(r => r.json()).then(d => {
+    if (d.success) { closeCompose(); location.reload(); }
+    else { alert('Error: ' + (d.error || '')); }
+  });
+}
+function generateAICompose() {
+  const subject = document.getElementById('composeSubject').value;
+  if (!subject) { alert('Escribe el asunto primero'); return; }
+  fetch('/emails/ai-reply', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({ context: subject, mode: 'compose' })
+  }).then(r => r.json()).then(d => {
+    if (d.reply) document.getElementById('composeBody').value = d.reply;
+  });
+}
+
+// ── Action buttons ──
+function archiveThread() { if(confirm('¿Archivar esta conversación?')) alert('Archivado (implementar endpoint)'); }
+function markSpam() { if(confirm('¿Marcar como spam?')) alert('Marcado como spam (implementar endpoint)'); }
+function createTask() { window.location = '/tasks/new?from_email=1&client_id={{ active_id or "" }}'; }
+function addClientFromEmail() {
+  const email = '{{ active_thread[0].from_email if active_thread else "" }}';
+  const name = '{{ active_thread[0].from_name if active_thread else "" }}';
+  window.location = '/clients/new?email=' + encodeURIComponent(email) + '&name=' + encodeURIComponent(name);
+}
+
+// ── CSRF helper ──
+function getCsrf() {
+  const m = document.cookie.match(/csrf_token=([^;]+)/);
+  return m ? m[1] : '';
+}
+
+// ── Scroll thread to bottom ──
+const thread = document.getElementById('threadMessages');
+if (thread) thread.scrollTop = thread.scrollHeight;
+
+// ── Close compose on backdrop click ──
+document.getElementById('composeModal').addEventListener('click', function(e) {
+  if (e.target === this) closeCompose();
+});
+
+// ── Auto-open compose if preset ──
+{% if compose_preset %}
+openCompose();
+{% endif %}
+</script>
+{% endblock %}

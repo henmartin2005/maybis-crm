@@ -1,0 +1,25 @@
+{# Colores de la marca (instance/brand.json → colors). Sobrescribe los tokens de style.css. #}
+{% set _c = brand.colors or {} %}
+<style>
+  :root {
+    {% if _c.accent %}--c-accent: {{ _c.accent }};{% endif %}
+    {% if _c.accent_hover %}--c-accent-h: {{ _c.accent_hover }};{% endif %}
+    {% if _c.sidebar_bg %}--sidebar-bg: {{ _c.sidebar_bg }};{% endif %}
+    {% if _c.background %}--c-bg: {{ _c.background }};{% endif %}
+  }
+  .brand-wordmark {
+    display: inline-block; color: #fff; font-weight: 700; font-size: 17px; letter-spacing: -.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+  body.sidebar-light .sidebar .brand-wordmark { color: var(--c-text); }
+  /* Logo pensado para fondo claro (brand.json → logo_url) sobre la barra/login oscuros */
+  .brand-logo-chip {
+    display: inline-flex; align-items: center; background: #fff; border-radius: 8px; padding: 3px 8px;
+  }
+  .topbar-mobile .brand-logo-chip img { max-height: 26px; display: block; }
+  .brand-logo-card {
+    display: inline-flex; align-items: center; justify-content: center; background: #fff;
+    border-radius: 16px; padding: 10px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  }
+  .login-logo .brand-logo-card img { height: auto !important; width: 100%; max-width: 340px; display: block; }
+</style>
